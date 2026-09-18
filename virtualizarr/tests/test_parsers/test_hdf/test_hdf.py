@@ -1,3 +1,4 @@
+import json
 import warnings
 
 import h5py  # type: ignore
@@ -209,6 +210,14 @@ class TestExtractAttributes:
         manifest_store = manifest_store_from_hdf_url(string_attributes_hdf5_url)
         metadata = manifest_store._group.arrays["data"].metadata
         assert len(metadata.attributes.keys()) == 2
+
+    def test_bytes_attributes(self, bytes_attributes_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(bytes_attributes_hdf5_url)
+        attributes = manifest_store._group.arrays["data"].metadata.attributes
+        assert attributes["character_array"] == "2042"
+        assert attributes["scalar"] == "scalar_value"
+        assert attributes["array"] == ["first", "second"]
+        json.dumps(attributes)
 
 
 @requires_hdf5plugin

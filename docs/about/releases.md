@@ -16,6 +16,11 @@
   without rewriting bytes.
   By [Tom Nicholas](https://github.com/TomNicholas).
 
+- `HDFParser` no longer fails on HDF5 files whose string attributes are stored as
+  arrays of bytes, as Imaris `.ims` files store them. Such an attribute is now decoded
+  to a `str`, or to a list of `str` where the array holds several strings.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
+
 ### Documentation
 
 ### Internal changes
