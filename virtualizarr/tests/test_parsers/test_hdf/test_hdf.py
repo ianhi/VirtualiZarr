@@ -219,6 +219,16 @@ class TestExtractAttributes:
         assert attributes["array"] == ["first", "second"]
         json.dumps(attributes)
 
+    def test_bytes_attributes_unjoined(self, bytes_attributes_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            bytes_attributes_hdf5_url, join_char_array_attrs=False
+        )
+        attributes = manifest_store._group.arrays["data"].metadata.attributes
+        assert attributes["character_array"] == ["2", "0", "4", "2"]
+        assert attributes["scalar"] == "scalar_value"
+        assert attributes["array"] == ["first", "second"]
+        json.dumps(attributes)
+
 
 @requires_hdf5plugin
 @requires_imagecodecs

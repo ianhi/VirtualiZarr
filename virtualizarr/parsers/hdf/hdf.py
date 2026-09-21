@@ -63,6 +63,8 @@ def _construct_manifest_array(
     filepath: str,
     dataset: H5Dataset,
     group: str,
+    *,
+    join_char_array_attrs: bool = True,
 ) -> ManifestArray:
     """
     Construct a ManifestArray from an h5py dataset
@@ -75,6 +77,9 @@ def _construct_manifest_array(
         An h5py dataset.
     group
         Name of the group containing this h5py.Dataset.
+    join_char_array_attrs
+        Whether to join an attribute stored as an array of one-byte strings
+        into a single string.
 
     Returns
     -------
@@ -82,7 +87,7 @@ def _construct_manifest_array(
     """
     chunks = _chunk_shape(dataset)
     codecs = codecs_from_dataset(dataset)
-    attrs = _extract_attrs(dataset)
+    attrs = _extract_attrs(dataset, join_char_array_attrs=join_char_array_attrs)
     dtype = dataset.dtype
 
     # HDF5 variable-length strings use numpy object dtype, which zarr v3 cannot
@@ -199,6 +204,7 @@ def _construct_manifest_group(
     *,
     group: str | None = None,
     drop_variables: Iterable[str] | None = None,
+    join_char_array_attrs: bool = True,
 ) -> ManifestGroup:
     """
     Construct a virtual Group from a HDF dataset.
@@ -218,7 +224,12 @@ def _construct_manifest_group(
         drop_variables = set(drop_variables or ()) | set(non_coordinate_dimension_vars)
         group_name = str(g.name)  # NOTE: this will always include leading "/"
         arrays = {
-            key: _construct_manifest_array(filepath, dataset, group_name)
+            key: _construct_manifest_array(
+                filepath,
+                dataset,
+                group_name,
+                join_char_array_attrs=join_char_array_attrs,
+            )
             for key in g.keys()
             if key not in drop_variables
             if isinstance(dataset := g[key], h5py.Dataset)
@@ -228,12 +239,13 @@ def _construct_manifest_group(
                 filepath,
                 reader,
                 group=str(Path(group) / key) if group is not None else key,
+                join_char_array_attrs=join_char_array_attrs,
             )
             for key in g.keys()
             if key not in drop_variables
             if isinstance(g[key], h5py.Group)
         }
-        attributes = _extract_attrs(g)
+        attributes = _extract_attrs(g, join_char_array_attrs=join_char_array_attrs)
 
     return ManifestGroup(arrays=arrays, groups=groups, attributes=attributes)
 
@@ -253,6 +265,20 @@ class HDFParser:
         Must return an object implementing the
         [ReadableFile][obspec_utils.protocols.ReadableFile] protocol.
         Default is [BlockStoreReader][obspec_utils.readers.BlockStoreReader].
+    join_char_array_attrs
+        Whether an attribute stored as an array of one-byte strings is read as a
+        single string (default: `True`), or as a list holding one string per
+        element.
+
+        HDF5 stores a fixed-length string attribute as an array of bytes, and
+        offers no way to tell a single string spelled one character per element
+        from a genuine array of one-character strings: both are a 1-d `|S1`
+        array. By default an attribute holding `[b"2", b"0", b"4", b"2"]` is
+        read as `"2042"`; pass `False` where the elements are meaningful on
+        their own to read it as `["2", "0", "4", "2"]` instead.
+
+        Attributes whose elements are longer than one byte are always read as a
+        list of strings, which this setting does not affect.
     """
 
     def __init__(
@@ -260,10 +286,13 @@ class HDFParser:
         group: str | None = None,
         drop_variables: Iterable[str] | None = None,
         reader_factory: ReaderFactory = BlockStoreReader,
+        *,
+        join_char_array_attrs: bool = True,
     ):
         self.group = group
         self.drop_variables = drop_variables
         self.reader_factory = reader_factory
+        self.join_char_array_attrs = join_char_array_attrs
 
     def __call__(
         self,
@@ -293,6 +322,7 @@ class HDFParser:
             reader=reader,
             group=self.group,
             drop_variables=self.drop_variables,
+            join_char_array_attrs=self.join_char_array_attrs,
         )
         # Convert to a manifest store
         return ManifestStore(registry=registry, group=manifest_group)
@@ -431,7 +461,7 @@ def _dataset_dims(dataset: H5Dataset, group: str = "/") -> list[str]:
     return [dim.removeprefix(group).removeprefix("/") for dim in dims]
 
 
-def _extract_attrs(h5obj: H5Dataset | H5Group):
+def _extract_attrs(h5obj: H5Dataset | H5Group, join_char_array_attrs: bool = True):
     """
     Extract attributes from an HDF5 group or dataset.
 
@@ -464,7 +494,7 @@ def _extract_attrs(h5obj: H5Dataset | H5Group):
                 decoded = [b.decode("utf-8") for b in np.atleast_1d(v).ravel()]
                 # Some writers store a string as an array of one-byte strings,
                 # one element per character.
-                if v.ndim == 0 or v.dtype.itemsize == 1:
+                if v.ndim == 0 or (join_char_array_attrs and v.dtype.itemsize == 1):
                     v = "".join(decoded)
                 else:
                     v = decoded
