@@ -2,6 +2,7 @@ import itertools
 from typing import TYPE_CHECKING, Any, Callable, Union, cast
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index
 
 from virtualizarr.utils import determine_chunk_grid_shape
 
@@ -132,10 +133,8 @@ def concatenate(
 
     check_same_ndims([arr.ndim for arr in arrays])
 
-    # Ensure we handle axis being passed as a negative integer
     first_arr = arrays[0]
-    if axis < 0:
-        axis = axis % first_arr.ndim
+    axis = normalize_axis_index(axis, first_arr.ndim)
 
     arr_shapes = [arr.shape for arr in arrays]
     arr_chunks = [manifest_chunk_shape(arr.metadata) for arr in arrays]
@@ -185,10 +184,9 @@ def stack(
     arr_shapes = [arr.shape for arr in arrays]
     check_same_shapes(arr_shapes)
 
-    # Ensure we handle axis being passed as a negative integer
     first_arr = arrays[0]
-    if axis < 0:
-        axis = axis % first_arr.ndim
+    # the result has one more axis than the inputs, so a negative axis counts from its end
+    axis = normalize_axis_index(axis, first_arr.ndim + 1)
 
     # find what new array shape must be
     length_along_new_stacked_axis = len(arrays)
@@ -212,7 +210,7 @@ def stack(
 
 
 @implements(np.expand_dims)
-def expand_dims(x: "ManifestArray", /, *, axis: int = 0) -> "ManifestArray":
+def expand_dims(x: "ManifestArray", /, axis: int = 0) -> "ManifestArray":
     """Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by axis."""
     # this is just a special case of stacking
     return stack([x], axis=axis)
@@ -359,7 +357,7 @@ def _prepend_singleton_dimensions(shape: tuple[int, ...], ndim: int) -> tuple[in
 
 @implements(np.full_like)
 def full_like(
-    x: "ManifestArray", /, fill_value: bool, *, dtype: np.dtype | None
+    x: "ManifestArray", /, fill_value: bool, *, dtype: np.dtype | None = None
 ) -> np.ndarray:
     """
     Returns a new array filled with fill_value and having the same shape as an input array x.
@@ -368,7 +366,7 @@ def full_like(
 
     Only implemented to get past some checks deep inside xarray, see https://github.com/zarr-developers/VirtualiZarr/issues/29.
     For creating a ManifestArray placeholder backed entirely by a fill_value, use
-    :meth:`ManifestArray.fill_value_placeholder` instead.
+    :meth:`ManifestArray.with_fill_value_only` instead.
     """
     return np.full(
         shape=x.shape,

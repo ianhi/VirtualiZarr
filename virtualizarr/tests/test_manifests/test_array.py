@@ -769,6 +769,37 @@ class TestStack:
         assert result.metadata.fill_value == metadata.fill_value
 
 
+class TestNegativeAxis:
+    @pytest.mark.parametrize("axis", [-1, -3])
+    def test_stack_matches_numpy(self, manifest_array, axis):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        result = np.stack([marr, marr], axis=axis)
+
+        assert result.shape == np.stack([np.empty((5, 20))] * 2, axis=axis).shape
+
+    @pytest.mark.parametrize("func, axis", [(np.stack, -4), (np.concatenate, -3)])
+    def test_out_of_range_raises(self, manifest_array, func, axis):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        with pytest.raises(np.exceptions.AxisError):
+            func([marr, marr], axis=axis)
+
+
+class TestNumpyCallSignatures:
+    def test_expand_dims_positional_axis(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        assert np.expand_dims(marr, 0).shape == (1, 5, 20)
+
+    def test_full_like_without_dtype(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        result = np.full_like(marr, 7)
+
+        np.testing.assert_array_equal(result, np.full((5, 20), 7, dtype=marr.dtype))
+
+
 class TestSharded:
     """
     Adding a length-1 axis to a sharded array must add it to the shard config too,

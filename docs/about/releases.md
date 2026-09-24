@@ -32,6 +32,15 @@
   Previously the new references were written under the old metadata, so reads silently
   returned wrong values.
   By [Ian Hunt-Isaak](https://github.com/ianhi).
+- `np.stack` on `ManifestArray`s with a negative `axis` now counts from the end of the
+  result, as numpy does: stacking two `(5, 20)` arrays with `axis=-1` gives `(5, 20, 2)`,
+  not `(5, 2, 20)`. `np.stack` and `np.concatenate` raise `AxisError` for an
+  out-of-range negative axis instead of wrapping around.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
+- `np.full_like(a, 0)` and `np.expand_dims(a, 0)` on a `ManifestArray` no longer raise
+  `TypeError`: as in numpy and the array API, `full_like`'s `dtype` defaults to `None`
+  and `expand_dims` accepts `axis` positionally.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
 
 ### Documentation
 
