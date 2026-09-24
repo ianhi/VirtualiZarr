@@ -467,11 +467,10 @@ def construct_virtual_dataset(
 
     """
 
-    # TODO: Remove private API `._group`
     if group:
         raise NotImplementedError("ManifestStore does not yet support nested groups")
     else:
-        manifestgroup = manifest_store._group
+        manifestgroup = manifest_store.group
 
     fully_virtual_ds = manifestgroup.to_virtual_dataset()
 
@@ -498,7 +497,7 @@ def construct_virtual_datatree(
     """
     Construct a fully or partly virtual datatree from a ManifestStore.
     """
-    node = manifest_store._group[group] if group else manifest_store._group
+    node = manifest_store.group[group] if group else manifest_store.group
 
     if isinstance(node, ManifestArray):
         node = ManifestGroup(arrays={group: node}, attributes={})

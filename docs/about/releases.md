@@ -11,6 +11,9 @@
   valid Zarr but not valid xarray can be written, such as arrays without dimension names or
   sibling arrays sharing dimension names at different lengths.
   By [Ian Hunt-Isaak](https://github.com/ianhi).
+- Added [ManifestStore.group][virtualizarr.manifests.ManifestStore.group], the store's root
+  [ManifestGroup][virtualizarr.manifests.ManifestGroup], so a parser's arrays can be
+  combined without xarray. By [Ian Hunt-Isaak](https://github.com/ianhi).
 
 ### Breaking changes
 
