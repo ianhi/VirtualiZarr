@@ -264,7 +264,7 @@ A `ManifestGroup` is a dedicated class that contains multiple `ManifestArray`, p
 It is designed to act similar to a Zarr group, such that a named collection of one or more `ManifestGroup` objects can be combined together to form a `ManifestStore`.
 
 Parsers return a `ManifestStore`, which `open_virtual_dataset` converts into a virtual dataset, loading any `loadable_variables` from it.
-You only need to use `ManifestStore` or `ManifestGroup` directly if you're planning to [write your own custom parser](custom_parsers.md) for an unsupported archival file format, or to [write a file to Icechunk without going via xarray](../how_to/usage.md#writing-to-icechunk-without-xarray), for instance because its structure doesn't fit [xarray's data model](#how-the-zarr-and-xarray-data-models-differ).
+You only need to use `ManifestStore` or `ManifestGroup` directly if you're planning to [write your own custom parser](custom_parsers.md) for an unsupported archival file format, or to [write a file to Icechunk without going via xarray](../how_to/without_xarray.md), for instance because its structure doesn't fit [xarray's data model](#how-the-zarr-and-xarray-data-models-differ).
 
 ## "Virtual" Xarray Datasets
 
@@ -280,7 +280,7 @@ A virtual dataset can also hold [loaded variables](faq.md#why-would-i-want-to-lo
 This is different from [inlining chunks](#inlined-chunks), which keeps the `ManifestArray` and holds some of its encoded chunks in memory.
 A `ManifestStore` has no equivalent of a loaded variable ([#799](https://github.com/zarr-developers/VirtualiZarr/issues/799)).
 An array whose chunks are all inlined is also held in memory, but as encoded chunks, tied to the array's chunk shape and codecs.
-To load arrays while writing a `ManifestStore` to Icechunk, see [the usage guide](../how_to/usage.md#writing-to-icechunk-without-xarray).
+To load arrays while writing a `ManifestStore` to Icechunk, see [the usage guide](../how_to/without_xarray.md).
 
 !!! note
     In theory we could then invert the mapping to convert the virtual xarray Dataset back to a `ManifestStore` before persisting to the Icechunk/Kerchunk formats, but we don't currently do that, mainly because it makes handling loaded variables more complex.
@@ -301,4 +301,4 @@ The models are not identical: xarray adds constraints that Zarr doesn't have.
 | A subgroup that reuses one of its parent's dimension names at a different length | Valid | An [xarray.DataTree][] requires each node to align with its parents, so this raises "not aligned with its parents" |
 
 Parsers can still represent all of these, because a `ManifestStore` follows the Zarr model.
-Converting such a store to a virtual dataset or datatree either fails or, for repeated dimension names, warns. You can instead write it to Icechunk directly with [ManifestStore.to_icechunk][virtualizarr.manifests.ManifestStore.to_icechunk], as shown in [the usage guide](../how_to/usage.md#writing-to-icechunk-without-xarray).
+Converting such a store to a virtual dataset or datatree either fails or, for repeated dimension names, warns. You can instead write it to Icechunk directly with [ManifestStore.to_icechunk][virtualizarr.manifests.ManifestStore.to_icechunk], as shown in [the usage guide](../how_to/without_xarray.md).
