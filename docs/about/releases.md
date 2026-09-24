@@ -11,6 +11,14 @@
   valid Zarr but not valid xarray can be written, such as arrays without dimension names or
   sibling arrays sharing dimension names at different lengths.
   By [Ian Hunt-Isaak](https://github.com/ianhi).
+- Added [ManifestStore.group][virtualizarr.manifests.ManifestStore.group], the store's root
+  [ManifestGroup][virtualizarr.manifests.ManifestGroup], so a parser's arrays can be
+  combined without xarray. By [Ian Hunt-Isaak](https://github.com/ianhi).
+- `np.stack`, `np.expand_dims` and `np.broadcast_to` work on a `ManifestArray` with
+  `dimension_names`. They raised a `ValueError`, because the result kept the old names,
+  one fewer than its axes. An added axis now gets a `None` name, which Zarr allows, and
+  the new [ManifestArray.with_dimension_names][virtualizarr.manifests.ManifestArray.with_dimension_names]
+  names it. By [Ian Hunt-Isaak](https://github.com/ianhi).
 
 ### Breaking changes
 
@@ -31,6 +39,15 @@
   name already exists with different metadata, for example if it used a different codec.
   Previously the new references were written under the old metadata, so reads silently
   returned wrong values.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
+- `np.stack` on `ManifestArray`s with a negative `axis` now counts from the end of the
+  result, as numpy does: stacking two `(5, 20)` arrays with `axis=-1` gives `(5, 20, 2)`,
+  not `(5, 2, 20)`. `np.stack` and `np.concatenate` raise `AxisError` for an
+  out-of-range negative axis instead of wrapping around.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
+- `np.full_like(a, 0)` and `np.expand_dims(a, 0)` on a `ManifestArray` no longer raise
+  `TypeError`: as in numpy and the array API, `full_like`'s `dtype` defaults to `None`
+  and `expand_dims` accepts `axis` positionally.
   By [Ian Hunt-Isaak](https://github.com/ianhi).
 
 ### Documentation

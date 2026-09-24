@@ -2,6 +2,7 @@ import itertools
 from typing import TYPE_CHECKING, Any, Callable, Union, cast
 
 import numpy as np
+from numpy.lib.array_utils import normalize_axis_index
 
 from virtualizarr.utils import determine_chunk_grid_shape
 
@@ -116,6 +117,8 @@ def concatenate(
     Concatenate ManifestArrays by merging their chunk manifests.
 
     The signature of this function is array API compliant, so that it can be called by `xarray.concat`.
+
+    The result has the first array's `dimension_names`; the other arrays' are not checked.
     """
 
     from .array import ManifestArray
@@ -132,10 +135,8 @@ def concatenate(
 
     check_same_ndims([arr.ndim for arr in arrays])
 
-    # Ensure we handle axis being passed as a negative integer
     first_arr = arrays[0]
-    if axis < 0:
-        axis = axis % first_arr.ndim
+    axis = normalize_axis_index(axis, first_arr.ndim)
 
     arr_shapes = [arr.shape for arr in arrays]
     arr_chunks = [manifest_chunk_shape(arr.metadata) for arr in arrays]
@@ -171,6 +172,9 @@ def stack(
     Stack ManifestArrays by merging their chunk manifests.
 
     The signature of this function is array API compliant, so that it can be called by `xarray.stack`.
+
+    The new axis gets a `None` dimension name and the others keep the first array's; name
+    it with :meth:`ManifestArray.with_dimension_names`.
     """
 
     from .array import ManifestArray
@@ -185,10 +189,9 @@ def stack(
     arr_shapes = [arr.shape for arr in arrays]
     check_same_shapes(arr_shapes)
 
-    # Ensure we handle axis being passed as a negative integer
     first_arr = arrays[0]
-    if axis < 0:
-        axis = axis % first_arr.ndim
+    # the result has one more axis than the inputs, so a negative axis counts from its end
+    axis = normalize_axis_index(axis, first_arr.ndim + 1)
 
     # find what new array shape must be
     length_along_new_stacked_axis = len(arrays)
@@ -204,16 +207,28 @@ def stack(
     new_chunks = list(old_chunks)
     new_chunks.insert(axis, 1)
 
+    old_names = first_arr.metadata.dimension_names
+    new_names = (
+        None if old_names is None else (*old_names[:axis], None, *old_names[axis:])
+    )
+
     new_metadata = copy_and_replace_metadata(
-        old_metadata=first_arr.metadata, new_shape=new_shape, new_chunks=new_chunks
+        old_metadata=first_arr.metadata,
+        new_shape=new_shape,
+        new_chunks=new_chunks,
+        new_dimension_names=new_names,
     )
 
     return ManifestArray(chunkmanifest=stacked_manifest, metadata=new_metadata)
 
 
 @implements(np.expand_dims)
-def expand_dims(x: "ManifestArray", /, *, axis: int = 0) -> "ManifestArray":
-    """Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by axis."""
+def expand_dims(x: "ManifestArray", /, axis: int = 0) -> "ManifestArray":
+    """
+    Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by axis.
+
+    The new axis gets a `None` dimension name.
+    """
     # this is just a special case of stacking
     return stack([x], axis=axis)
 
@@ -222,6 +237,8 @@ def expand_dims(x: "ManifestArray", /, *, axis: int = 0) -> "ManifestArray":
 def broadcast_to(x: "ManifestArray", /, shape: tuple[int, ...]) -> "ManifestArray":
     """
     Broadcasts a ManifestArray to a specified shape, by either adjusting chunk keys or copying chunk manifest entries.
+
+    Any prepended axes get a `None` dimension name.
     """
 
     from .array import ManifestArray
@@ -249,10 +266,15 @@ def broadcast_to(x: "ManifestArray", /, shape: tuple[int, ...]) -> "ManifestArra
     # do broadcasting of entries in manifest
     broadcasted_manifest = _broadcast_manifest(x.manifest, shape=new_chunk_grid_shape)
 
+    old_names = x.metadata.dimension_names
+    n_new_axes = len(new_shape) - x.ndim
+    new_names = None if old_names is None else (None,) * n_new_axes + old_names
+
     new_metadata = copy_and_replace_metadata(
         old_metadata=x.metadata,
         new_shape=list(new_shape),
         new_chunks=list(new_chunk_shape),
+        new_dimension_names=new_names,
     )
 
     return ManifestArray(chunkmanifest=broadcasted_manifest, metadata=new_metadata)
@@ -359,7 +381,7 @@ def _prepend_singleton_dimensions(shape: tuple[int, ...], ndim: int) -> tuple[in
 
 @implements(np.full_like)
 def full_like(
-    x: "ManifestArray", /, fill_value: bool, *, dtype: np.dtype | None
+    x: "ManifestArray", /, fill_value: bool, *, dtype: np.dtype | None = None
 ) -> np.ndarray:
     """
     Returns a new array filled with fill_value and having the same shape as an input array x.
@@ -368,7 +390,7 @@ def full_like(
 
     Only implemented to get past some checks deep inside xarray, see https://github.com/zarr-developers/VirtualiZarr/issues/29.
     For creating a ManifestArray placeholder backed entirely by a fill_value, use
-    :meth:`ManifestArray.fill_value_placeholder` instead.
+    :meth:`ManifestArray.with_fill_value_only` instead.
     """
     return np.full(
         shape=x.shape,

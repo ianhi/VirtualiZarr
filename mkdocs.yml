@@ -22,6 +22,7 @@ nav:
     - "getting_started/installation.md"
   - How-to guides:
     - "how_to/usage.md"
+    - "how_to/without_xarray.md"
     - "how_to/examples.md"
     - "how_to/validation.md"
     - "how_to/scaling.md"

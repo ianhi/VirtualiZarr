@@ -769,6 +769,83 @@ class TestStack:
         assert result.metadata.fill_value == metadata.fill_value
 
 
+class TestNegativeAxis:
+    @pytest.mark.parametrize("axis", [-1, -3])
+    def test_stack_matches_numpy(self, manifest_array, axis):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        result = np.stack([marr, marr], axis=axis)
+
+        assert result.shape == np.stack([np.empty((5, 20))] * 2, axis=axis).shape
+
+    @pytest.mark.parametrize("func, axis", [(np.stack, -4), (np.concatenate, -3)])
+    def test_out_of_range_raises(self, manifest_array, func, axis):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        with pytest.raises(np.exceptions.AxisError):
+            func([marr, marr], axis=axis)
+
+
+class TestNumpyCallSignatures:
+    def test_expand_dims_positional_axis(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        assert np.expand_dims(marr, 0).shape == (1, 5, 20)
+
+    def test_full_like_without_dtype(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        result = np.full_like(marr, 7)
+
+        np.testing.assert_array_equal(result, np.full((5, 20), 7, dtype=marr.dtype))
+
+
+class TestAddedAxisIsUnnamed:
+    """
+    Nothing names an axis that stack, expand_dims or broadcast_to adds, so it gets a None
+    dimension name and the existing axes keep theirs.
+    """
+
+    @pytest.mark.parametrize(
+        "axis, names", [(0, (None, "y", "x")), (-1, ("y", "x", None))]
+    )
+    def test_stack(self, manifest_array, axis, names):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10), dimension_names=("y", "x"))
+
+        result = np.stack([marr, marr], axis=axis)
+
+        assert result.metadata.dimension_names == names
+
+    def test_broadcast_to(self, manifest_array):
+        marr = manifest_array(shape=(1, 20), chunks=(1, 10), dimension_names=("y", "x"))
+
+        result = np.broadcast_to(marr, shape=(2, 3, 20))
+
+        assert result.metadata.dimension_names == (None, "y", "x")
+
+    def test_unnamed_input_stays_unnamed(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10))
+
+        assert np.stack([marr, marr]).metadata.dimension_names is None
+        assert np.broadcast_to(marr, (2, 5, 20)).metadata.dimension_names is None
+
+
+class TestWithDimensionNames:
+    def test_sets_names(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10), dimension_names=("y", "x"))
+
+        result = marr.with_dimension_names(("t", None))
+
+        assert result.metadata.dimension_names == ("t", None)
+        assert result.manifest is marr.manifest
+        assert marr.metadata.dimension_names == ("y", "x")
+
+    def test_none_removes_names(self, manifest_array):
+        marr = manifest_array(shape=(5, 20), chunks=(5, 10), dimension_names=("y", "x"))
+
+        assert marr.with_dimension_names(None).metadata.dimension_names is None
+
+
 class TestSharded:
     """
     Adding a length-1 axis to a sharded array must add it to the shard config too,

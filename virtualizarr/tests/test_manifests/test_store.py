@@ -278,6 +278,10 @@ class TestManifestStore:
         assert not local_store.supports_partial_writes
         assert not local_store.supports_consolidated_metadata
 
+    def test_group(self, local_store):
+        assert isinstance(local_store.group, ManifestGroup)
+        assert local_store.group is local_store._group
+
     def test_nbytes(self, manifest_array):
         marr = manifest_array()
         group = ManifestGroup(arrays={"foo": marr})

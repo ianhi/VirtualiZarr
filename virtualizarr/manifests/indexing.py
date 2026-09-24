@@ -333,13 +333,11 @@ def apply_selection(
     if sub_chunk_byte_adjust is not None:
         new_manifest = _shift_manifest_byte_ranges(new_manifest, *sub_chunk_byte_adjust)
     old_dimension_names = marr.metadata.dimension_names
-    # zarr's dimension_names is tuple[str | None, ...] but copy_and_replace_metadata's
-    # type hint says Iterable[str]; the runtime handles None entries fine, so cast through.
-    new_dimension_names: Any
-    if old_dimension_names is None:
-        new_dimension_names = "default"  # sentinel: leave as None
-    else:
-        new_dimension_names = tuple(old_dimension_names[a] for a in kept_axes)
+    new_dimension_names = (
+        None
+        if old_dimension_names is None
+        else tuple(old_dimension_names[a] for a in kept_axes)
+    )
     new_metadata = copy_and_replace_metadata(
         marr.metadata,
         new_shape=new_shape,
