@@ -1,5 +1,6 @@
 import dataclasses
 import warnings
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Callable, Union, cast
 
 import numpy as np
@@ -337,6 +338,23 @@ class ManifestArray:
             ),
         )
         return ManifestArray(metadata=new_metadata, chunkmanifest=empty_manifest)
+
+    def with_dimension_names(
+        self, names: Sequence[str | None] | None
+    ) -> "ManifestArray":
+        """
+        Return a new ManifestArray with the given dimension names, sharing this one's chunk manifest.
+
+        Parameters
+        ----------
+        names
+            One name per axis, where `None` leaves that axis unnamed, or None to remove
+            all the names.
+        """
+        new_metadata = utils.copy_and_replace_metadata(
+            self.metadata, new_dimension_names=names
+        )
+        return ManifestArray(metadata=new_metadata, chunkmanifest=self.manifest)
 
     def to_virtual_variable(self) -> xr.Variable:
         """

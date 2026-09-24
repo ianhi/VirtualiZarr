@@ -14,6 +14,11 @@
 - Added [ManifestStore.group][virtualizarr.manifests.ManifestStore.group], the store's root
   [ManifestGroup][virtualizarr.manifests.ManifestGroup], so a parser's arrays can be
   combined without xarray. By [Ian Hunt-Isaak](https://github.com/ianhi).
+- `np.stack`, `np.expand_dims` and `np.broadcast_to` work on a `ManifestArray` with
+  `dimension_names`. They raised a `ValueError`, because the result kept the old names,
+  one fewer than its axes. An added axis now gets a `None` name, which Zarr allows, and
+  the new [ManifestArray.with_dimension_names][virtualizarr.manifests.ManifestArray.with_dimension_names]
+  names it. By [Ian Hunt-Isaak](https://github.com/ianhi).
 
 ### Breaking changes
 

@@ -516,7 +516,7 @@ def copy_and_replace_metadata(
     old_metadata: ArrayV3Metadata,
     new_shape: list[int] | None = None,
     new_chunks: list[int] | None = None,
-    new_dimension_names: Iterable[str] | None | Literal["default"] = "default",
+    new_dimension_names: Iterable[str | None] | None | Literal["default"] = "default",
     new_attributes: dict | None = None,
 ) -> ArrayV3Metadata:
     """

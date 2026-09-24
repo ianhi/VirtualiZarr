@@ -91,3 +91,47 @@ Merging chunks works the same way: to load a coordinate stored as one chunk per 
 !!! important
     `zarr.from_array` copies the fill value and attributes only from zarr 3.4 onwards.
     With older versions, pass them yourself, as in `fill_value=lat_source.fill_value, attributes=lat_source.attrs.asdict()`.
+
+## Combining arrays
+
+Numpy functions such as `np.stack` and `np.concatenate` combine [ManifestArray][virtualizarr.manifests.ManifestArray]s by merging their chunk manifests, so arrays from several files can be combined without xarray.
+Take a parser's arrays from the store's root group with [ManifestStore.group][virtualizarr.manifests.ManifestStore.group].
+Here are the same variable under two emissions scenarios:
+
+```python exec="on" session="without_xarray" source="material-block" result="code"
+import numpy as np
+
+ssp126_url = url
+ssp245_url = url.replace("ssp126", "ssp245")
+ssp126 = HDFParser()(url=ssp126_url, registry=registry).group.arrays["tasmax"]
+ssp245 = HDFParser()(url=ssp245_url, registry=registry).group.arrays["tasmax"]
+
+stacked = np.stack([ssp126, ssp245])
+print(stacked)
+print(stacked.metadata.dimension_names)
+```
+
+Nothing names the axis `np.stack` adds, so its dimension name is `None`, which Zarr allows, and the other axes keep the first array's names.
+`np.expand_dims` and `np.broadcast_to` name added axes the same way.
+Name the new axis with [ManifestArray.with_dimension_names][virtualizarr.manifests.ManifestArray.with_dimension_names]:
+
+```python exec="on" session="without_xarray" source="material-block" result="code"
+tasmax = stacked.with_dimension_names(("scenario", "time", "lat", "lon"))
+print(tasmax.metadata.dimension_names)
+```
+
+Dimension names are not checked: `np.stack` and `np.concatenate` keep the first array's names, whatever the others are called.
+To have them checked, [combine virtual datasets with xarray](usage.md#combining-virtual-datasets) instead.
+
+Write the result to Icechunk in a [ManifestGroup][virtualizarr.manifests.ManifestGroup]:
+
+```python exec="on" session="without_xarray" source="material-block" result="code"
+from virtualizarr.manifests import ManifestGroup
+
+session = repo.writable_session("main")
+ManifestGroup(arrays={"tasmax": tasmax}).to_icechunk(session.store, group="scenarios")
+session.commit("Stacked two scenarios")
+
+written = zarr.open_array(session.store, path="scenarios/tasmax", mode="r")
+print(written.shape, written.metadata.dimension_names)
+```

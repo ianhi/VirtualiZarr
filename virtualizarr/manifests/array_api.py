@@ -117,6 +117,8 @@ def concatenate(
     Concatenate ManifestArrays by merging their chunk manifests.
 
     The signature of this function is array API compliant, so that it can be called by `xarray.concat`.
+
+    The result has the first array's `dimension_names`; the other arrays' are not checked.
     """
 
     from .array import ManifestArray
@@ -170,6 +172,9 @@ def stack(
     Stack ManifestArrays by merging their chunk manifests.
 
     The signature of this function is array API compliant, so that it can be called by `xarray.stack`.
+
+    The new axis gets a `None` dimension name and the others keep the first array's; name
+    it with :meth:`ManifestArray.with_dimension_names`.
     """
 
     from .array import ManifestArray
@@ -202,8 +207,16 @@ def stack(
     new_chunks = list(old_chunks)
     new_chunks.insert(axis, 1)
 
+    old_names = first_arr.metadata.dimension_names
+    new_names = (
+        None if old_names is None else (*old_names[:axis], None, *old_names[axis:])
+    )
+
     new_metadata = copy_and_replace_metadata(
-        old_metadata=first_arr.metadata, new_shape=new_shape, new_chunks=new_chunks
+        old_metadata=first_arr.metadata,
+        new_shape=new_shape,
+        new_chunks=new_chunks,
+        new_dimension_names=new_names,
     )
 
     return ManifestArray(chunkmanifest=stacked_manifest, metadata=new_metadata)
@@ -211,7 +224,11 @@ def stack(
 
 @implements(np.expand_dims)
 def expand_dims(x: "ManifestArray", /, axis: int = 0) -> "ManifestArray":
-    """Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by axis."""
+    """
+    Expands the shape of an array by inserting a new axis (dimension) of size one at the position specified by axis.
+
+    The new axis gets a `None` dimension name.
+    """
     # this is just a special case of stacking
     return stack([x], axis=axis)
 
@@ -220,6 +237,8 @@ def expand_dims(x: "ManifestArray", /, axis: int = 0) -> "ManifestArray":
 def broadcast_to(x: "ManifestArray", /, shape: tuple[int, ...]) -> "ManifestArray":
     """
     Broadcasts a ManifestArray to a specified shape, by either adjusting chunk keys or copying chunk manifest entries.
+
+    Any prepended axes get a `None` dimension name.
     """
 
     from .array import ManifestArray
@@ -247,10 +266,15 @@ def broadcast_to(x: "ManifestArray", /, shape: tuple[int, ...]) -> "ManifestArra
     # do broadcasting of entries in manifest
     broadcasted_manifest = _broadcast_manifest(x.manifest, shape=new_chunk_grid_shape)
 
+    old_names = x.metadata.dimension_names
+    n_new_axes = len(new_shape) - x.ndim
+    new_names = None if old_names is None else (None,) * n_new_axes + old_names
+
     new_metadata = copy_and_replace_metadata(
         old_metadata=x.metadata,
         new_shape=list(new_shape),
         new_chunks=list(new_chunk_shape),
+        new_dimension_names=new_names,
     )
 
     return ManifestArray(chunkmanifest=broadcasted_manifest, metadata=new_metadata)

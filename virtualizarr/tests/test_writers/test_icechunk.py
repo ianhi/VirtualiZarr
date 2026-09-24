@@ -1,7 +1,7 @@
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 import numpy as np
 import numpy.testing as npt
@@ -1372,6 +1372,21 @@ class TestManifestGroupToIcechunk:
         assert isinstance(b_written.metadata, ArrayV3Metadata)
         assert b_written.metadata.dimension_names == ("t",)
         npt.assert_array_equal(b_written[:], b)
+
+    def test_writes_an_unnamed_added_axis(
+        self, icechunk_filestore: "IcechunkStore", raw_marr
+    ):
+        frames = [np.arange(20, dtype="<i4").reshape(4, 5) + 100 * i for i in range(3)]
+        marrs = [raw_marr(f"frame{i}", f, ("y", "x")) for i, f in enumerate(frames)]
+        # np.stack dispatches to ManifestArray's own stack, which mypy can't see
+        stacked = cast(ManifestArray, np.stack(marrs))
+
+        ManifestGroup(arrays={"stacked": stacked}).to_icechunk(icechunk_filestore)
+
+        written = zarr.open_array(icechunk_filestore, path="stacked", mode="r")
+        assert isinstance(written.metadata, ArrayV3Metadata)
+        assert written.metadata.dimension_names == (None, "y", "x")
+        npt.assert_array_equal(written[:], np.stack(frames))
 
     @pytest.mark.parametrize(
         "structure, xarray_error",
