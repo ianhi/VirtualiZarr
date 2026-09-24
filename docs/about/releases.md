@@ -4,7 +4,23 @@
 
 ### New Features
 
+- `HDFParser` can now load HDF5 variable-length strings, object references, and
+  compound datasets with either as a member, which can't be read through virtual
+  references. Pass `non_virtualizable="load"` to read them with h5py and store them as
+  inlined chunks, `"drop"` to leave them out, or a dict mapping dataset paths to either.
+  Object references become the path of the object they point to, and reference-valued
+  attributes are converted the same way. This makes NWB files and netCDF4 files with
+  string variables parseable. Closes [#1104](https://github.com/zarr-developers/VirtualiZarr/issues/1104).
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
+
 ### Breaking changes
+
+- `HDFParser` now raises an error listing every non-virtualizable dataset unless
+  `non_virtualizable` says what to do with them. Variable-length strings were previously
+  virtualized with a warning, but reading them failed, and `open_virtual_dataset` failed
+  on any file containing one. Loading copies data into any store the result is written
+  to, so it is never the default.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
 
 ### Bug fixes
 

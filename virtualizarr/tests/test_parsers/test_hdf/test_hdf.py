@@ -143,9 +143,10 @@ class TestDatasetToManifestArray:
         metadata = manifest_store._group.arrays["data"].metadata
         assert "_FillValue" in metadata.attributes
 
-    @pytest.mark.filterwarnings("ignore:.*variable-length string dataset.*:UserWarning")
     def test_string_dtype_fill_value(self, string_dtype_hdf5_url):
-        manifest_store = manifest_store_from_hdf_url(string_dtype_hdf5_url)
+        manifest_store = manifest_store_from_hdf_url(
+            string_dtype_hdf5_url, non_virtualizable="load"
+        )
         metadata = manifest_store._group.arrays["data"].metadata
         assert isinstance(metadata.fill_value, (str, bytes, np.bytes_))
 
@@ -165,24 +166,9 @@ class TestDatasetToManifestArray:
         metadata = manifest_store._group.arrays["data"].metadata
         assert metadata.fill_value == b"\xff\xfe\xff\xfe\xff"
 
-    def test_variable_length_string_warns_on_parse(self, vlen_string_hdf5_url):
-        with pytest.warns(UserWarning, match="variable-length string"):
-            manifest_store_from_hdf_url(vlen_string_hdf5_url)
-
-    def test_ascii_variable_length_string_warns_on_parse(
-        self, ascii_vlen_string_hdf5_url
-    ):
-        # an ascii-cset vlen string is still a vlen string, so it should warn like
-        # the utf-8 case rather than fail the whole file as an unsupported object dtype
-        with pytest.warns(UserWarning, match="variable-length string"):
-            manifest_store = manifest_store_from_hdf_url(ascii_vlen_string_hdf5_url)
-        metadata = manifest_store._group.arrays["data"].metadata
-        assert metadata.data_type.to_native_dtype() == np.dtypes.StringDType()
-
-    @pytest.mark.filterwarnings("ignore:.*variable-length string dataset.*:UserWarning")
     def test_string_dtype_cf_fill_value(self, string_dtype_with_fillvalue_hdf5_url):
         manifest_store = manifest_store_from_hdf_url(
-            string_dtype_with_fillvalue_hdf5_url
+            string_dtype_with_fillvalue_hdf5_url, non_virtualizable="load"
         )
         metadata = manifest_store._group.arrays["data"].metadata
         assert "_FillValue" in metadata.attributes
@@ -193,6 +179,101 @@ class TestDatasetToManifestArray:
         manifest_store = manifest_store_from_hdf_url(cf_array_fill_value_hdf5_url)
         metadata = manifest_store._group.arrays["data"].metadata
         assert not isinstance(metadata.attributes["_FillValue"], np.ndarray)
+
+
+@requires_hdf5plugin
+@requires_imagecodecs
+class TestNonVirtualizable:
+    def test_default_raises_listing_datasets(self, vlen_string_hdf5_url):
+        with pytest.raises(ValueError, match="/data: variable-length string"):
+            manifest_store_from_hdf_url(vlen_string_hdf5_url)
+
+    def test_load_variable_length_string(self, vlen_string_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            vlen_string_hdf5_url, non_virtualizable="load"
+        )
+        z = zarr.open_array(manifest_store, path="data", mode="r", zarr_format=3)
+        np.testing.assert_array_equal(z[...], ["hello", "world"])
+
+    def test_load_ascii_variable_length_string(self, ascii_vlen_string_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            ascii_vlen_string_hdf5_url, non_virtualizable="load"
+        )
+        z = zarr.open_array(manifest_store, path="data", mode="r", zarr_format=3)
+        np.testing.assert_array_equal(z[...], ["hello", "world"])
+
+    def test_load_chunked_variable_length_string(self, chunked_vlen_string_hdf5_url):
+        # 3 values in chunks of 2, so the second chunk is a partial edge chunk
+        manifest_store = manifest_store_from_hdf_url(
+            chunked_vlen_string_hdf5_url, non_virtualizable="load"
+        )
+        z = zarr.open_array(manifest_store, path="data", mode="r", zarr_format=3)
+        assert z.chunks == (2,)
+        np.testing.assert_array_equal(z[...], ["a", "bb", "ccc"])
+
+    def test_drop(self, vlen_string_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            vlen_string_hdf5_url, non_virtualizable="drop"
+        )
+        assert "data" not in manifest_store._group.arrays
+
+    def test_load_object_reference(self, object_reference_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            object_reference_hdf5_url, non_virtualizable="load"
+        )
+        z = zarr.open_array(manifest_store, path="refs", mode="r", zarr_format=3)
+        np.testing.assert_array_equal(z[...], ["/values", "/group", ""])
+
+    def test_load_compound_with_reference_member(self, compound_reference_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            compound_reference_hdf5_url, non_virtualizable="load"
+        )
+        z = zarr.open_array(manifest_store, path="rows", mode="r", zarr_format=3)
+        assert z[...].tolist() == [(0, 3, "/values")]
+
+    def test_reference_attribute(self, reference_attribute_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(reference_attribute_hdf5_url)
+        metadata = manifest_store._group.arrays["values"].metadata
+        assert metadata.attributes["table"] == "/values"
+
+    def test_mapping(self, object_reference_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            object_reference_hdf5_url, non_virtualizable={"/refs": "load"}
+        )
+        assert "refs" in manifest_store._group.arrays
+
+    def test_mapping_fallback_drops_unlisted(self, object_reference_hdf5_url):
+        manifest_store = manifest_store_from_hdf_url(
+            object_reference_hdf5_url, non_virtualizable={"*": "drop"}
+        )
+        assert list(manifest_store._group.arrays) == ["values"]
+
+    def test_mapping_rejects_loading_unlisted(self):
+        with pytest.raises(ValueError, match='only accepts "drop"'):
+            HDFParser(non_virtualizable={"*": "load"})
+
+    def test_mapping_rejects_relative_paths(self):
+        with pytest.raises(ValueError, match="paths from the file root"):
+            HDFParser(non_virtualizable={"refs": "load"})
+
+    def test_rejects_unknown_action(self):
+        with pytest.raises(ValueError, match='"load" or "drop"'):
+            HDFParser(non_virtualizable="keep")
+
+    def test_load_unloadable_raises(self, vlen_sequence_hdf5_url):
+        with pytest.raises(ValueError, match="/data: variable-length sequence"):
+            manifest_store_from_hdf_url(
+                vlen_sequence_hdf5_url, non_virtualizable="load"
+            )
+
+    def test_loadable_variables(self, vlen_string_hdf5_url, local_registry):
+        with open_virtual_dataset(
+            url=vlen_string_hdf5_url,
+            registry=local_registry,
+            parser=HDFParser(non_virtualizable="load"),
+            loadable_variables=["data"],
+        ) as vds:
+            np.testing.assert_array_equal(vds["data"].to_numpy(), ["hello", "world"])
 
 
 @requires_hdf5plugin

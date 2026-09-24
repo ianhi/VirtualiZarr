@@ -113,7 +113,7 @@ A `ChunkManifest` can also hold **inlined chunks**: the raw chunk bytes are carr
 
 Inlined chunks are useful for small variables — coordinate arrays, dimension labels, scalar metadata — where the overhead of a remote read exceeds the cost of just carrying the bytes along.
 
-Inlined chunks are produced by [parsers](custom_parsers.md), not by end users; there is no way to request them via `loadable_variables`. If you are writing a custom parser for a format that stores small inlined references (e.g., Kerchunk JSON), you can emit them using the constructors below.
+Inlined chunks are produced by [parsers](custom_parsers.md), not by end users; there is no way to request them via `loadable_variables`. For example, `HDFParser(non_virtualizable="load")` stores HDF5 variable-length strings and object references as inlined chunks, because their values aren't in the file's chunks (see [HDF5 variables that can't be virtualized](../how_to/usage.md#hdf5-variables-that-cant-be-virtualized)). If you are writing a custom parser for a format that stores small inlined references (e.g., Kerchunk JSON), you can emit them using the constructors below.
 
 Internally, inlined chunks live in a sparse dictionary `_inlined: dict[tuple[int, ...], bytes]` on the `ChunkManifest`, keyed by chunk grid index. The corresponding entry in the paths array is set to the `INLINED_CHUNK_PATH` sentinel.
 

@@ -560,6 +560,71 @@ def ascii_vlen_string_hdf5_url(tmp_path: Path) -> str:
 
 
 @pytest.fixture
+def chunked_vlen_string_hdf5_url(tmp_path: Path) -> str:
+    filepath = str(tmp_path / "chunked_vlen_string.nc")
+
+    with h5py.File(filepath, "w") as f:
+        f.create_dataset(
+            name="data",
+            data=np.array(["a", "bb", "ccc"], dtype=h5py.string_dtype()),
+            chunks=(2,),
+            compression="gzip",
+        )
+
+    return f"file://{filepath}"
+
+
+@pytest.fixture
+def object_reference_hdf5_url(tmp_path: Path) -> str:
+    filepath = str(tmp_path / "object_reference.h5")
+
+    with h5py.File(filepath, "w") as f:
+        f["values"] = np.arange(3.0)
+        f.create_group("group")
+        f.create_dataset(
+            "refs",
+            data=[f["values"].ref, f["group"].ref, h5py.Reference()],
+            dtype=h5py.ref_dtype,
+        )
+
+    return f"file://{filepath}"
+
+
+@pytest.fixture
+def compound_reference_hdf5_url(tmp_path: Path) -> str:
+    filepath = str(tmp_path / "compound_reference.h5")
+
+    with h5py.File(filepath, "w") as f:
+        f["values"] = np.arange(3.0)
+        dt = np.dtype([("idx_start", "i4"), ("count", "i4"), ("ts", h5py.ref_dtype)])
+        f.create_dataset("rows", data=np.array([(0, 3, f["values"].ref)], dtype=dt))
+
+    return f"file://{filepath}"
+
+
+@pytest.fixture
+def reference_attribute_hdf5_url(tmp_path: Path) -> str:
+    filepath = str(tmp_path / "reference_attribute.h5")
+
+    with h5py.File(filepath, "w") as f:
+        f["values"] = np.arange(3.0)
+        f["values"].attrs["table"] = f["values"].ref
+
+    return f"file://{filepath}"
+
+
+@pytest.fixture
+def vlen_sequence_hdf5_url(tmp_path: Path) -> str:
+    filepath = str(tmp_path / "vlen_sequence.h5")
+
+    with h5py.File(filepath, "w") as f:
+        dset = f.create_dataset("data", shape=(1,), dtype=h5py.vlen_dtype("i4"))
+        dset[0] = np.array([1, 2, 3], dtype="i4")
+
+    return f"file://{filepath}"
+
+
+@pytest.fixture
 def string_dtype_with_fillvalue_hdf5_url(tmp_path: Path) -> str:
     filepath = str(tmp_path / "string_dtype_fillvalue.nc")
 

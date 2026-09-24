@@ -281,6 +281,86 @@ vds = open_virtual_dataset(
 print(vds)
 ```
 
+### HDF5 variables that can't be virtualized
+
+Some HDF5 and netCDF4 variables can't be read through virtual references, because their chunks hold pointers into the HDF5 file instead of the values:
+
+- variable-length strings, including netCDF4 `string` variables
+- [object references](https://docs.h5py.org/en/stable/refs.html), which point to another dataset or group in the same file
+- compound datasets (HDF5 tables) with a string or reference member
+
+When [HDFParser][virtualizarr.parsers.HDFParser] finds any of these, it raises an error listing them:
+
+```
+ValueError: 1 dataset(s) in this file can't be virtualized, because their chunks store pointers into the HDF5 file rather than their values:
+  /station: variable-length string, shape (3,)
+Choose what HDFParser does with them using `non_virtualizable`: ...
+```
+
+The `non_virtualizable` parameter of `HDFParser` sets what happens to them:
+
+- `"load"` reads the values while parsing and stores them in the virtual dataset as [inlined chunks](../explanation/data_structures.md#inlined-chunks).
+- `"drop"` leaves the variables out.
+- A dict maps each variable's full path in the file to `"load"` or `"drop"`. Add `"*": "drop"` to drop every variable you don't list.
+
+```python exec="on" session="strings"
+import tempfile
+from pathlib import Path
+
+import numpy as np
+import xarray as xr
+from obspec_utils.registry import ObjectStoreRegistry
+from obstore.store import LocalStore
+
+from virtualizarr import open_virtual_dataset
+from virtualizarr.parsers import HDFParser
+
+tmp = Path(tempfile.mkdtemp())
+xr.Dataset(
+    {
+        "station": ("x", np.array(["alpha", "beta", "gamma"], dtype=object)),
+        "temperature": ("x", [11.2, 9.8, 12.5]),
+    }
+).to_netcdf(tmp / "stations.nc", engine="netcdf4")
+url = f"file://{tmp}/stations.nc"
+registry = ObjectStoreRegistry({"file:///": LocalStore("/")})
+```
+
+```python exec="on" session="strings" source="material-block" result="code"
+vds = open_virtual_dataset(
+    url=url,
+    registry=registry,
+    parser=HDFParser(non_virtualizable="load"),
+)
+print(vds)
+```
+
+To choose per variable, list each path. In an NWB file you might keep two fields and drop the rest:
+
+```python
+parser = HDFParser(
+    non_virtualizable={
+        "/session_description": "load",
+        "/general/extracellular_ephys/electrodes/group": "load",
+        "*": "drop",
+    }
+)
+```
+
+Loading stores each kind of value as follows:
+
+- Strings stay strings.
+- Object references become the path of the object they point to, such as `"/general/extracellular_ephys/ElectrodeGroup"`. Reference-valued attributes are always converted this way, whatever `non_virtualizable` says.
+- String and reference members of a compound dataset become fixed-width strings, as wide as the longest value in that file. Two files can end up with different widths, and their virtual datasets then can't be concatenated.
+
+Region references and variable-length sequences have no Zarr equivalent, so they can only be dropped.
+
+!!! warning "Loading copies data into your store"
+    Loaded values are copied into every store you write the virtual dataset to, once for each file you virtualize.
+    When writing to Icechunk, chunks smaller than the repository's inline chunk threshold are stored inside Icechunk's manifests rather than as separate objects, so many small string chunks also make those manifests larger to read.
+    This is why `HDFParser` makes you choose instead of loading by default.
+    Load only the variables you need and drop the rest.
+
 ## Combining virtual datasets
 
 In general we should be able to combine all the datasets from our archival files into one using some combination of calls to [xarray.concat][] and [xarray.merge][].
