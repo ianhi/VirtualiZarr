@@ -1,4 +1,6 @@
 import asyncio
+import io
+import struct
 import zipfile
 
 import numpy as np
@@ -314,31 +316,72 @@ def test_index_does_not_read_local_headers(tmp_path, zarr_format):
             ] == zf.read(name), name
 
 
-def test_falls_back_to_local_headers_when_offsets_disagree(tmp_path):
-    """
-    Archives whose local extra fields differ from the central directory's must still be
-    read correctly, by falling back to the local headers.
-
-    `force_zip64` is the documented divergence: zipfile writes a 20-byte ZIP64 extra field
-    into the local header but not into the central directory.
-    """
-    zip_path = tmp_path / "forced.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        for i in range(3):
-            with zf.open(
-                zipfile.ZipInfo(f"member_{i}.bin"), "w", force_zip64=True
-            ) as f:
-                f.write(bytes([i]) * 500)
-
-    counting = _CountingStore(LocalStore(prefix=str(tmp_path)))
-    index = asyncio.run(parse_zip_index(counting, zip_path.name))
-
+def _assert_index_matches_zipfile(zip_path, index):
     raw = zip_path.read_bytes()
     with zipfile.ZipFile(zip_path) as zf:
+        assert set(index) == set(zf.namelist())
         for name, entry in index.items():
             assert raw[
                 entry.data_offset : entry.data_offset + entry.compressed_length
             ] == zf.read(name), name
 
-    # the fallback means it paid for the local headers, rather than being wrong
-    assert counting.n_ranges > 3, counting.n_ranges
+
+@pytest.mark.parametrize("n_extra_lengths", [1, 2])
+def test_local_header_shifts_cost_one_read_per_extra_length(tmp_path, n_extra_lengths):
+    """
+    Archives whose local extra fields differ in length from the central directory's must
+    be read correctly, reading one local header per central extra field length rather
+    than one per member.
+
+    `force_zip64` is the documented divergence: zipfile writes a 20-byte ZIP64 extra field
+    into the local header but not into the central directory. A large archive can mix
+    differences too: past 4 GiB the central directory gains a ZIP64 offset that the local
+    header lacks, so early and late members are shifted by different amounts. Here odd
+    members carry an extra field in both headers instead of forcing ZIP64.
+    """
+    zip_path = tmp_path / "forced.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        for i in range(30):
+            info = zipfile.ZipInfo(f"member_{i}.bin")
+            unforced = n_extra_lengths == 2 and i % 2 == 1
+            if unforced:
+                info.extra = struct.pack("<HH4s", 0x6666, 4, b"test")
+            with zf.open(info, "w", force_zip64=not unforced) as f:
+                f.write(bytes([i]) * 500)
+
+    counting = _CountingStore(LocalStore(prefix=str(tmp_path)))
+    index = asyncio.run(parse_zip_index(counting, zip_path.name))
+
+    _assert_index_matches_zipfile(zip_path, index)
+    assert counting.n_ranges <= 3 + n_extra_lengths, counting.n_ranges
+
+
+class _Unseekable(io.RawIOBase):
+    def __init__(self, f):
+        self._f = f
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        return self._f.write(b)
+
+
+def test_falls_back_to_local_headers_with_data_descriptors(tmp_path):
+    """
+    A member followed by a data descriptor leaves a gap before the next local header,
+    which is indistinguishable from a longer local extra field without reading the local
+    header, so such archives must pay for every local header rather than be wrong.
+
+    zipfile writes data descriptors when the output is not seekable.
+    """
+    zip_path = tmp_path / "streamed.zip"
+    with open(zip_path, "wb") as f, zipfile.ZipFile(_Unseekable(f), "w") as zf:
+        for i in range(30):
+            zf.writestr(f"member_{i}.bin", bytes([i]) * 500)
+
+    counting = _CountingStore(LocalStore(prefix=str(tmp_path)))
+    index = asyncio.run(parse_zip_index(counting, zip_path.name))
+
+    _assert_index_matches_zipfile(zip_path, index)
+    assert counting.n_ranges > 30, counting.n_ranges

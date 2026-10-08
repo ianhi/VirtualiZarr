@@ -151,6 +151,25 @@ def _data_offsets_are_contiguous(
     )
 
 
+async def _read_data_offsets(
+    store: ObstoreStore, path: str, names: list[str], header_offsets: list[int]
+) -> list[int]:
+    """Read each member's 30-byte local header, batched, to find where its data starts."""
+    local_headers = await store.get_ranges_async(
+        path,
+        starts=header_offsets,
+        ends=[offset + _LOC_LEN for offset in header_offsets],
+    )
+    data_offsets = []
+    for name, header_offset, local_header in zip(names, header_offsets, local_headers):
+        local = bytes(local_header)
+        if not local.startswith(_LOC_SIG):
+            raise ValueError(f"{path}: invalid local file header for member {name!r}")
+        local_fn_len, local_extra_len = struct.unpack_from("<HH", local, 26)
+        data_offsets.append(header_offset + _LOC_LEN + local_fn_len + local_extra_len)
+    return data_offsets
+
+
 async def parse_zip_index(store: ObstoreStore, path: str) -> dict[str, ZipEntry]:
     """Read a zip archive's central directory and local headers to build a member index.
 
@@ -158,9 +177,10 @@ async def parse_zip_index(store: ObstoreStore, path: str) -> dict[str, ZipEntry]
     usually contains the whole central directory), and possibly the central directory
     itself. Member data offsets are derived from the central directory and verified against
     the archive's layout by
-    [_data_offsets_are_contiguous][virtualizarr.parsers.zarr.zip._data_offsets_are_contiguous];
-    only archives that fail that check pay for a further batched read of every member's
-    local header.
+    [_data_offsets_are_contiguous][virtualizarr.parsers.zarr.zip._data_offsets_are_contiguous].
+    Archives that fail that check pay for one local header per distinct central directory
+    extra field length, and only those that fail it again read every member's local
+    header.
 
     Parameters
     ----------
@@ -223,6 +243,7 @@ async def parse_zip_index(store: ObstoreStore, path: str) -> dict[str, ZipEntry]
     compressed_lengths: list[int] = []
     uncompressed_lengths: list[int] = []
     header_offsets: list[int] = []
+    extra_lengths: list[int] = []
     # where each member's data would start if its local header's filename and extra field
     # are the same length as the central directory's copies of them
     presumed_data_offsets: list[int] = []
@@ -263,6 +284,7 @@ async def parse_zip_index(store: ObstoreStore, path: str) -> dict[str, ZipEntry]
         compressed_lengths.append(compressed)
         uncompressed_lengths.append(uncompressed)
         header_offsets.append(header_offset)
+        extra_lengths.append(extra_len)
         presumed_data_offsets.append(header_offset + _LOC_LEN + fn_len + extra_len)
 
     # directory placeholder members legitimately reduce the count below n_entries
@@ -274,32 +296,36 @@ async def parse_zip_index(store: ObstoreStore, path: str) -> dict[str, ZipEntry]
     if not names:
         return {}
 
-    if _data_offsets_are_contiguous(
-        presumed_data_offsets, compressed_lengths, header_offsets, cd_offset
+    data_offsets = presumed_data_offsets
+    if not _data_offsets_are_contiguous(
+        data_offsets, compressed_lengths, header_offsets, cd_offset
     ):
-        data_offsets = presumed_data_offsets
-    else:
-        # The local header's filename/extra-field lengths are what really determine where
-        # member data starts, and the extra field may differ in length from the central
-        # directory's copy — so read each member's 30-byte local header, batched.
-        local_headers = await store.get_ranges_async(
+        # A writer's local extra field usually differs from the central directory's by the
+        # same amount for every member whose central copy has the same length, e.g. a ZIP64
+        # writer adds an offset to the central copy only past 4 GiB. So one local header per
+        # length gives the shift for every member with that length.
+        first_with_length: dict[int, int] = {}
+        for i, extra_len in enumerate(extra_lengths):
+            first_with_length.setdefault(extra_len, i)
+        probes = list(first_with_length.values())
+        probed = await _read_data_offsets(
+            store,
             path,
-            starts=header_offsets,
-            ends=[offset + _LOC_LEN for offset in header_offsets],
+            [names[i] for i in probes],
+            [header_offsets[i] for i in probes],
         )
-        data_offsets = []
-        for name, header_offset, local_header in zip(
-            names, header_offsets, local_headers
+        shifts = {
+            extra_lengths[i]: data_offset - presumed_data_offsets[i]
+            for i, data_offset in zip(probes, probed)
+        }
+        data_offsets = [
+            offset + shifts[extra_len]
+            for offset, extra_len in zip(presumed_data_offsets, extra_lengths)
+        ]
+        if not _data_offsets_are_contiguous(
+            data_offsets, compressed_lengths, header_offsets, cd_offset
         ):
-            local = bytes(local_header)
-            if not local.startswith(_LOC_SIG):
-                raise ValueError(
-                    f"{path}: invalid local file header for member {name!r}"
-                )
-            local_fn_len, local_extra_len = struct.unpack_from("<HH", local, 26)
-            data_offsets.append(
-                header_offset + _LOC_LEN + local_fn_len + local_extra_len
-            )
+            data_offsets = await _read_data_offsets(store, path, names, header_offsets)
 
     return {
         name: ZipEntry(

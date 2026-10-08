@@ -4,6 +4,14 @@
 
 ### New Features
 
+### Performance
+
+- Building the member index of a zip archive whose local headers differ in length from
+  the central directory's records, such as one written by Info-ZIP's `zip`, by `zipfile`
+  with `force_zip64=True`, or any archive past 4 GiB, now costs one extra request per
+  distinct central directory extra field length instead of one per member.
+  By [Ian Hunt-Isaak](https://github.com/ianhi).
+
 ### Breaking changes
 
 ### Bug fixes
