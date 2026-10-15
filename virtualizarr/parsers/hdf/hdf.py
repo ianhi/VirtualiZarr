@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import functools
 import math
-import operator
 import posixpath
+from array import array
 from pathlib import Path, PurePosixPath
 from typing import (
     TYPE_CHECKING,
@@ -550,16 +550,26 @@ def _dataset_chunk_manifest(
             chunk_entries = {chunk_key: chunk_entry}
             chunk_manifest = ChunkManifest(entries=chunk_entries)
     else:
+        # Appending integers to typed arrays costs less per chunk than writing each
+        # chunk into the numpy arrays from this callback: about 15% less CPU from
+        # local disk, for about 32 bytes per chunk until the arrays are filled
+        # below. With network latency per request the difference disappears.
+        coords, byte_offsets, sizes = array("q"), array("Q"), array("Q")
+
+        def add_chunk_info(blob):
+            coords.extend(blob.chunk_offset)
+            byte_offsets.append(blob.byte_offset)
+            sizes.append(blob.size)
+
+        dsid.chunk_iter(add_chunk_info)
+
         paths = np.empty(grid_shape, dtype=np.dtypes.StringDType)
         offsets = np.zeros(grid_shape, dtype=np.uint64)
         lengths = np.zeros(grid_shape, dtype=np.uint64)
-
-        def add_chunk_info(blob):
-            key = tuple(map(operator.floordiv, blob.chunk_offset, chunks))
-            offsets[key] = blob.byte_offset
-            lengths[key] = blob.size
-
-        dsid.chunk_iter(add_chunk_info)
+        chunk_offsets = np.frombuffer(coords, dtype=np.int64)
+        keys = tuple((chunk_offsets.reshape(-1, len(chunks)) // chunks).T)
+        offsets[keys] = np.frombuffer(byte_offsets, dtype=np.uint64)
+        lengths[keys] = np.frombuffer(sizes, dtype=np.uint64)
 
         # When an oversized chunk has been trimmed the stored chunk holds
         # more bytes than the in-bounds region, so use the trimmed chunk's
@@ -571,6 +581,8 @@ def _dataset_chunk_manifest(
             lengths[lengths != 0] = math.prod(chunks) * dataset.dtype.itemsize
 
         # Every chunk here is in the same file, so its path only needs validating once.
+        # paths[keys] = ... would copy the string once per chunk into an
+        # intermediate array, so fill every entry and clear the missing chunks.
         paths[...] = validate_and_normalize_path_to_uri(filepath)
         paths[lengths == 0] = MISSING_CHUNK_PATH
         chunk_manifest = ChunkManifest.from_arrays(
